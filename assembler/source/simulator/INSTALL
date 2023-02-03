@@ -1,0 +1,35 @@
+
+INSTALLING P3SIM FROM SOURCE
+
+On Linux:
+
+Just type "make" inside this directory. Then, copy p3SimTcl,
+p3sim, and all the .gifs to a directory somewhere in you system
+and edit the copyed "p3sim" file with the editor of your choice.
+In the begin of the file, adjust the following lines to the
+location where you installed the program:
+
+  #!/bin/sh
+  # Next line is commented for wish but uncommented for (B)ash\
+  ./p3SimTcl "$0" "$@"
+  # \
+  exit
+  set p3path "./"
+
+For example, if you installed the emulator in /usr/local/p3sim,
+edit as follows:
+
+  #!/bin/sh
+  # Next line is commented for wish but uncommented for (B)ash\
+  /usr/local/p3sim/p3SimTcl "$0" "$@"
+  # \
+  exit
+  set p3path "/usr/local/p3sim/"
+
+
+On Windows:
+
+Follow the instruction to install a MinGW32 build environment
+(../INSTALL.mingw32). Then, open a MSYS shell and follow the
+Linux procedure.
+

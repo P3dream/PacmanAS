@@ -1,0 +1,47 @@
+# $Id: Makefile,v 1.1 2000/03/10 cnr $
+
+TCLSRC = c:\tcl
+SRCDIR = .
+OUTDIR = $(SRCDIR)
+
+CC=cl
+YFLAGS	= -dvy
+YACC = bison.exe
+CFLAGS=
+#CFLAGS= /DYYDEBUG=1 /DDEBUG
+LEX	= flex -i
+P	=  $(SRCDIR)\scan.obj $(SRCDIR)\labels.obj $(SRCDIR)\main.obj $(SRCDIR)\y.tab.obj
+
+
+all: 	p3as.exe
+ 
+p3as.exe: 		$(P)
+	$(CC) $(CFLAGS) /Fe$(OUTDIR)\p3as.exe $(P)
+
+y.tab.c y.tab.h:	assem.y
+	$(YACC) $(YFLAGS) -o$(OUTDIR)\y.tab.c $(SRCDIR)\assem.y
+
+scan.c:		scan.l y.tab.h
+	$(LEX) -o$(OUTDIR)\scan.c $(SRCDIR)\scan.l 
+
+y.tab.obj: 	y.tab.c y.tab.h
+	$(CC) $(CFLAGS) /c /DMSDOS $(SRCDIR)\y.tab.c
+
+main.obj:	main.c mod_date.h y.tab.h 
+	$(CC) $(CFLAGS) /I$(TCLSRC)\include -c $(SRCDIR)\$*.c
+
+labels.obj:	labels.c y.tab.h
+	$(CC) $(CFLAGS) /c $(SRCDIR)\$*.c
+
+scan.obj:       scan.c y.tab.h
+	$(CC) $(CFLAGS) /c $(SRCDIR)\$*.c
+
+clean:
+		del *.obj $(OUTDIR)\y.tab.c $(OUTDIR)\scan.c
+
+
+
+# $Log: Makefile,v $
+# Revision 1.1  2000/03/10 cnr $
+# Initial revision
+#

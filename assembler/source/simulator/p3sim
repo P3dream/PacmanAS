@@ -1,0 +1,1590 @@
+#!/bin/sh
+# Next line is commented for wish but uncommented for (B)ash\
+./p3SimTcl "$0" "$@"
+# \
+exit
+
+set p3path "./"
+#set p3path "/usr/local/p3sim/"
+
+#
+#/*-------------------------------------------------------------------------
+#| Simulator for the CISC uP described in Chapter 12 of
+#| "Introducao aos Sistemas Digitais e Microprocessadores",
+#| by G. Arroz, J. Monteiro and A. Oliveira,
+#| IST Press, 2005
+#|
+#| Tcl script that launches the simulator.
+#|
+#| History: 17/mar/01 - JCM - created.
+#|
+#| Copyright (c) 2001	Guilherme Arroz, egsa@alfa.ist.utl.pt
+#|                      Jose' Monteiro, jcm@inesc.pt
+#|                      Arlindo Oliveira, aml@inesc.pt
+#|                 	Technical University of Lisbon, Portugal
+#+------------------------------------------------------------------------*/
+
+#!/home/ac/bin/p3SimTcl
+
+#
+#  utils.tcl
+#
+
+proc donStep {stepnum} {
+    for {set i 1} {$i <= $stepnum} {incr i} {
+	doStep
+    }
+}
+
+proc dostepwin {} {
+    global regNum systemRegisters
+    if {[catch { toplevel .stepWin}] > 0} {return}
+
+    frame .stepWin.stepn
+    label .stepWin.stepn.label -text "Número de instruções:"
+    entry .stepWin.stepn.val
+    button .stepWin.dosteps -text "Executar" -relief raised -command {
+	donStep [.stepWin.stepn.val get]
+	destroy .stepWin
+    }
+
+    pack .stepWin.stepn.label .stepWin.stepn.val -side left -fill both -expand 1
+    pack .stepWin.stepn .stepWin.dosteps  -expand 1 -fill both
+}
+
+proc gethnum {strnum} {
+    set hex [string range $strnum 0 [expr [string length $strnum]-2]]
+    switch [string index $strnum [expr [string length $strnum]-1]] {
+	h {}
+	b {set hex [format %x [bin2dec $hex]]}
+	d {set hex [format %x $hex]}
+	default {set hex $strnum}
+    }
+    set hex
+}
+
+# bin2dec: integer (bin) -> integer (dec)
+proc bin2dec {binnum} {
+    set res 0 
+    for  {set i [expr [string length $binnum] - 1];set j 1} {$i >= 0} {set i [expr $i - 1]; set j [expr $j * 2 ]} {
+	set res [expr $res + [expr [string index $binnum $i] * $j]]
+    }
+    set res
+}
+
+# displayUsage: displays the usage information
+proc displayUsage {} {
+    puts "Simulator for the CISC uP described in Chapter 12"
+    puts "of \"Arquitectura de Computadores: dos Sistemas Digitais aos Microprocessadores\","
+    puts "by G. Arroz, J. Monteiro  and A. Oliveira."
+    puts "IST Press, 2007"
+    puts ""
+    puts " -A path   - load path as Map ROM A"
+    puts " -B path   - load path as Map ROM B"
+    puts " -C path   - load path as Control ROM"
+    puts " \[-P\] path - load path as program"
+    puts " -H|--help - display this usage info"
+    exit
+}
+
+# clrmem: clear main memory
+proc clrmem {} {
+    fillmem 0
+}
+
+# fillmem: sets every memory word to the specified value
+proc fillmem {value} {
+    set val [gethnum $value]
+    for {set i 0} {$i <= 65535} {incr i} {
+	setMemoryValue [format %x $i] $val
+    }
+    resetStats
+    resetPC
+    redisplay
+}
+
+proc dpos {w {x 300} {y 300}} {
+    wm geometry $w +$x+$y
+}
+
+proc displayFiles {lst pat {directorySelected {}} } {
+
+    if {$directorySelected=={}} {
+	set list [glob -nocomplain .* * ]
+
+#	set list [exec ls -a]
+
+	set list2 {}
+
+	foreach i $list {
+	    if { [file isdirectory $i] } {
+		lappend list2 $i
+	    } else {
+		if { [string match $pat $i] } {
+		    lappend list2 $i
+		}
+	    }
+	}
+
+
+	$lst delete 0 end
+
+	foreach i [lreverse $list2] {
+	    $lst insert 0 $i
+	}
+    } else {
+
+	cd $directorySelected
+
+	set list [glob -nocomplain .* *]
+
+#	set list [exec ls -a]
+
+	set list2 {}
+
+	foreach i $list {
+	    if { [file isdirectory $i] } {
+		lappend list2 $i
+	    } else {
+		if { [string match $pat $i] } {
+		    lappend list2 $i
+		}
+	    }
+	}
+
+
+	$lst delete 0 end
+
+	foreach i [lreverse $list2] {
+	    $lst insert 0 $i
+	}
+    }
+}
+
+proc lreverse {l} {
+        set l2 ""
+        for {set i [expr [llength $l]-1]} {$i>=0} {incr i -1} {
+                lappend l2 [lindex $l $i]
+        }
+        return $l2
+}
+
+
+proc fileSelection {title defPattern def_filename {mot {}}} {
+   global mother fileSelected currentPattern
+   set mother $mot
+
+    set fileSelected $def_filename
+    set currentPattern $defPattern
+
+    if {$mother == {}} {
+        catch {destroy .ficheiro}
+        toplevel .ficheiro
+        dpos .ficheiro
+        wm title .ficheiro
+        wm iconname .ficheiro
+        wm minsize .ficheiro 1 1
+    } else {
+        frame $mother.ficheiro
+    }
+
+    if {$title != ""} {
+        message $mother.ficheiro.msg -text $title -width 8c
+    }
+    frame $mother.ficheiro.frame -borderwidth 10
+    button $mother.ficheiro.abort -text Cancela \
+        -command "set fileSelected {}; destroy $mother.ficheiro"
+    button $mother.ficheiro.ok -text OK -command {
+        set list [glob -nocomplain .* *]
+#       set list [exec ls -a]
+        foreach i $list {
+	   if { [file isdirectory $i] } {
+	       if {$fileSelected==$i} {
+		   set fileSelected {};
+	       }
+	   }
+        }
+
+        destroy $mother.ficheiro
+    }
+
+
+    label $mother.ficheiro.label -text [pwd]
+    pack $mother.ficheiro.label -side top
+
+    frame $mother.ficheiro.frame.1
+    frame $mother.ficheiro.frame.2
+
+    label $mother.ficheiro.frame.1.label -text "Ficheiro:"
+    pack $mother.ficheiro.frame.1.label -side left
+    entry $mother.ficheiro.frame.1.file -relief sunken -textvariable fileSelected
+    pack $mother.ficheiro.frame.1.file -fill x
+    pack $mother.ficheiro.frame.1 -fill x
+
+    label $mother.ficheiro.frame.2.label -text "Filtro:"
+    pack $mother.ficheiro.frame.2.label -side left
+    entry $mother.ficheiro.frame.2.pat -relief sunken -textvariable currentPattern
+    pack $mother.ficheiro.frame.2.pat -fill x
+    pack $mother.ficheiro.frame.2 -fill x
+
+
+    if {$title != ""} {
+        pack $mother.ficheiro.msg -side top
+    }
+    pack $mother.ficheiro.frame -side top -expand yes -fill y
+    pack $mother.ficheiro.abort -side bottom -fill x
+    pack $mother.ficheiro.ok -side bottom -fill x
+    if {$mother != {}} {
+        pack $mother.ficheiro
+    }
+
+    scrollbar $mother.ficheiro.frame.scroll -relief sunken -command "$mother.ficheiro.frame.list yview"
+    listbox $mother.ficheiro.frame.list -yscroll "$mother.ficheiro.frame.scroll set" -relief sunken \
+	    -setgrid 1
+   pack $mother.ficheiro.frame.scroll -side right -fill y
+   pack $mother.ficheiro.frame.list -side left -expand yes -fill both
+
+   bind $mother.ficheiro.frame.list <ButtonRelease-1> {
+       catch {
+	   set fileSelected [$mother.ficheiro.frame.list get [$mother.ficheiro.frame.list curselection]]
+       }
+
+       $mother.ficheiro.label configure -text [pwd]
+   }
+
+   bind $mother.ficheiro.frame.list <Double-1> {
+       set fileSelected [$mother.ficheiro.frame.list get [$mother.ficheiro.frame.list curselection]]
+       if {[file isdirectory $fileSelected]} {
+	   displayFiles $mother.ficheiro.frame.list $currentPattern $fileSelected
+	   $mother.ficheiro.label configure -text [pwd]
+       } else {
+	   displayFiles $mother.ficheiro.frame.list $currentPattern
+	   $mother.ficheiro.label configure -text [pwd]
+	   after 100 {destroy $mother.ficheiro}
+       }
+
+   }
+
+   bind $mother.ficheiro.frame.2.pat <KeyRelease> {
+       displayFiles $mother.ficheiro.frame.list $currentPattern
+   }
+
+   displayFiles $mother.ficheiro.frame.list $defPattern
+
+   tkwait window $mother.ficheiro
+   return $fileSelected
+}
+
+#
+#  display.tcl
+#
+proc resetStats {} {
+    global clocks instructions
+    set clocks 0
+    set instructions 0
+}
+
+proc displayRegs {} {
+    for {set i 0} {$i < 8} {incr i} {
+        .programview.f_$i.value config -text [regContent $i]
+    }
+    .programview.sp.value config -text [spContent]
+    .programview.pc.value config -text [pcContent]
+    for {set i 0} {$i < 5} {incr i} {
+        .programview.re.fl_$i config -text [reContent $i]
+    }
+}
+
+proc displayInternals {} {
+    for {set i 8} {$i < 16} {incr i} {
+        .controlview.f_$i.value config -text [regContent $i]
+    }
+    for {set i 2} {$i < 4} {incr i} {
+        .controlview.re.fl_$i config -text [ureContent $i]
+    }
+
+    .controlview.ir.intfvalue config -text [intContent]
+    .controlview.car.value config -text [carContent]
+    .controlview.ir.value config -text [irContent]
+    .controlview.car.sbrvalue config -text [sbrContent]
+    .controlview.ui.value config -text [uiContent]
+}
+
+proc displayRoms {} {
+    global displayFont
+    toplevel .roms
+
+    frame .roms.mem1
+    label .roms.mem1.name -text "ROM A"
+    scrollbar .roms.mem1.scroll1 -command ".roms.mem1.display1 yview"
+    listbox .roms.mem1.display1 -yscroll ".roms.mem1.scroll1 set" -width 30 -height 8 -font $displayFont
+
+    frame .roms.mem2
+    label .roms.mem2.name -text "ROM B"
+    scrollbar .roms.mem2.scroll1 -command ".roms.mem2.display1 yview"
+    listbox .roms.mem2.display1 -yscroll ".roms.mem2.scroll1 set" -width 30 -height 8 -font $displayFont
+
+    frame .roms.mem3
+    label .roms.mem3.name -text "ROM Controlo"
+    scrollbar .roms.mem3.scroll1 -command ".roms.mem3.display1 yview"
+    listbox .roms.mem3.display1 -yscroll ".roms.mem3.scroll1 set" -width 30 -height 8 -font $displayFont
+
+    displayRomContents
+
+    pack .roms.mem1.name
+    pack .roms.mem1.scroll1 -side right -fill y
+    pack .roms.mem1.display1  -side left -fill both -expand 1
+    pack .roms.mem1
+    pack .roms.mem2.name
+    pack .roms.mem2.scroll1 -side right -fill y
+    pack .roms.mem2.display1  -side left -fill both -expand 1
+    pack .roms.mem2
+    pack .roms.mem3.name
+    pack .roms.mem3.scroll1 -side right -fill y
+    pack .roms.mem3.display1  -side left -fill both -expand 1
+    pack .roms.mem3
+
+}
+
+proc displayRomContents {} {
+    catch {
+        .roms.mem1.display1 delete 0 end
+        .roms.mem2.display1 delete 0 end
+        .roms.mem3.display1 delete 0 end
+
+        for {set i 0} {$i < 64} {incr i} {
+            .roms.mem1.display1 insert $i "[format "%02x   :   %s" \
+                    $i   [mapROMContent $i A]]"
+        }
+        for {set i 0} {$i < 16} {incr i} {
+            .roms.mem2.display1 insert $i "[format "%01x   :   %s" \
+                    $i   [mapROMContent $i B]]"
+        }
+        for {set i 0} {$i < 512} {incr i} {
+            .roms.mem3.display1 insert $i "[format "%03x   :   %s" \
+                    $i   [controlROMContent $i]]"
+        }
+    }
+}
+
+proc redisplay {} {
+    displayRegs
+    displayInternals
+    displayMem
+    displayProgram
+}
+
+
+
+proc displayMem {} {
+    global topmem_start bottommem_start topmem_n bottommem_n
+    set ypos1 [lindex [.memory.mem1.display1 yview] 0]
+    .memory.mem1.display1 delete 0 end
+    set imax [expr $topmem_start+8*$topmem_n]
+    for {set i $topmem_start} {$i < $imax} {incr i 8} {
+        .memory.mem1.display1 insert $i "[format "%04x   :   %s" \
+                [expr $i]    [memContent [expr $i]]]"
+    }
+    .memory.mem1.display1 yview moveto $ypos1
+    set ypos2 [lindex [.memory.mem2.display2 yview] 0]
+    .memory.mem2.display2 delete 0 end
+    set imax [expr $bottommem_start+8*$bottommem_n]
+    for {set i $bottommem_start} {$i < $imax } {incr i 8} {
+        .memory.mem2.display2 insert $i "[format "%04x   :   %s" \
+                [expr $i]    [memContent [expr $i]]]"
+    }
+    .memory.mem2.display2 yview moveto $ypos2
+}
+
+proc displayProgram {} {
+    global startProg endProg positions breakpoint
+    set ypos [lindex [.bottom.program.display yview] 0]
+    .bottom.program.display delete 0 end
+    set cnt 0
+    for {set i $startProg} {$i < $endProg} {incr i} {
+        set s [unassembleAddr $i]
+        if {$s != ""} {
+            set x [lindex $s 0]
+            if {[info exists breakpoint($x)]} {
+                set br ">>"
+            } else {
+                set br "  "
+            }
+            .bottom.program.display insert $i "$br$s"
+            set positions($x) $cnt
+            incr cnt
+        }
+    }
+    set pc [pcContent]
+    if {[info exists positions($pc)]} {
+        .bottom.program.display yview [expr $positions($pc)-4]
+        .bottom.program.display selection set $positions($pc) $positions($pc)
+    } else {
+        .bottom.program.display delete 0 end
+        .bottom.program.display insert 0 "A posição apontada pelo PC não contém uma instrução válida"
+    }
+}
+
+
+
+proc doStep {} {
+    global instructions clocks normalColor
+    .bottom.program.display config -selectbackground $normalColor
+    incr clocks [stepProc]
+    incr instructions
+    redisplay
+}
+
+proc doClock {} {
+    global instructions clocks normalColor
+    .bottom.program.display config -selectbackground $normalColor
+    incr clocks 1
+    incr instructions [clockProc]
+    redisplay
+}
+
+proc switchProcRunStatus {} {
+    global runLoop instructions clocks positions breakpoint normalColor
+    set runLoop 1
+    .bottom.program.display config -selectbackground $normalColor
+    .bottom.control.stop config -text "Parar" -command {set runLoop 0} -foreground "Red"
+    for {} {$runLoop == 1} {incr instructions} {
+        set res [stepProc]
+        set pp [pcContent]
+        if {[info exists breakpoint($pp)]} {
+            .bottom.program.display config -selectbackground red
+            set runLoop 0
+        }
+        if {$res == "0"} {
+            set runLoop 0
+        }
+        incr clocks $res
+        update
+    }
+    .bottom.control.stop config -text "Continua" -foreground "Black" \
+            -command {switchProcRunStatus}
+    redisplay
+    bell
+}
+
+
+
+proc setRegister {} {
+    global regNum systemRegisters
+    if {[catch { toplevel .escreveRegisto}] > 0} {return}
+    frame .escreveRegisto.number
+    menubutton .escreveRegisto.number.but -menu .escreveRegisto.number.but.menu \
+            -textvar regNum -relief raised -borderwid 4
+
+
+    set regNum R1
+    menu .escreveRegisto.number.but.menu
+    foreach reg $systemRegisters {
+        .escreveRegisto.number.but.menu add radiobutton \
+            -label $reg -variable regNum -value $reg
+    }
+    frame .escreveRegisto.value
+#    label .escreveRegisto.number.label -text "Reg"
+#    entry .escreveRegisto.number.val
+    label .escreveRegisto.value.label -text "Valor"
+    entry .escreveRegisto.value.val
+    button .escreveRegisto.set -text "Guarda" -relief raised -command {
+            setRegisterValue $regNum [.escreveRegisto.value.val get]
+            redisplay
+        }
+    button .escreveRegisto.done -command {destroy .escreveRegisto; redisplay} -text "Fecha"
+
+    pack .escreveRegisto.number.but -side left -fill both -expand 1
+    pack .escreveRegisto.value.label .escreveRegisto.value.val -side left -fill both -expand 1
+
+    pack .escreveRegisto.number .escreveRegisto.value -expand 1 -fill both
+    pack .escreveRegisto.set .escreveRegisto.done -expand 1 -fill both
+}
+
+# setMemoryValueAux: wrapper for setMemoryValue, if the address is '-1',
+# invokes fillmem instead of setMemoryValue
+proc setMemoryValueAux {pos val} {
+    if {$pos == -1} {
+	fillmem $val
+    } else {
+	setMemoryValue $pos  [gethnum $val]
+    }
+    redisplay
+}
+
+proc setMemory {} {
+    global regNum systemRegisters
+    if {[catch { toplevel .escreveMemoria}] > 0} {return}
+
+    frame .escreveMemoria.position
+    frame .escreveMemoria.value
+    label .escreveMemoria.position.label -text "Endereço"
+    entry .escreveMemoria.position.val
+    label .escreveMemoria.value.label -text "Valor"
+    entry .escreveMemoria.value.val
+    button .escreveMemoria.set -text "Guarda" -relief raised -command {
+            setMemoryValueAux [.escreveMemoria.position.val get] [.escreveMemoria.value.val get]
+        redisplay
+        }
+    button .escreveMemoria.done -command {destroy .escreveMemoria; redisplay} -text "Fecha"
+
+    pack .escreveMemoria.position.label .escreveMemoria.position.val -side left -fill both -expand 1
+    pack .escreveMemoria.value.label .escreveMemoria.value.val -side left -fill both -expand 1
+
+    pack .escreveMemoria.position .escreveMemoria.value -expand 1 -fill both
+    pack .escreveMemoria.set .escreveMemoria.done -expand 1 -fill both
+}
+
+
+proc setIVAD {} {
+    global displayFont
+    global ivadNum ivadVal_0 ivadVal_1 ivadVal_2 ivadVal_3 ivadVal_4 ivadVal_5 ivadVal_6 ivadVal_7
+    global ivadVal_8 ivadVal_9 ivadVal_10 ivadVal_11 ivadVal_12 ivadVal_13 ivadVal_14
+    global ivadEnable_0 ivadEnable_1 ivadEnable_2 ivadEnable_3 ivadEnable_4 ivadEnable_5 ivadEnable_6 ivadEnable_7
+    global ivadEnable_8 ivadEnable_9 ivadEnable_10 ivadEnable_11 ivadEnable_12 ivadEnable_13 ivadEnable_14
+    if {[catch { toplevel .ivad}] > 0} {return}
+
+    for {set i 0} {$i < 15} {incr i} {
+        frame .ivad.ivad_$i
+        set name [format "IVAD%1d" $i]
+        label .ivad.ivad_$i.name -font $displayFont -text "$name"
+        checkbutton .ivad.ivad_$i.but -var ivadEnable_$i \
+                -command {setIVADs}
+        entry .ivad.ivad_$i.value -font $displayFont -textvar ivadVal_$i
+      }
+
+    for {set i 0} {$i < 10} {incr i} {
+        pack .ivad.ivad_$i.name -side left -padx 4
+        pack .ivad.ivad_$i.value .ivad.ivad_$i.but -side left
+        pack .ivad.ivad_$i
+    }
+
+    for {set i 10} {$i < 15} {incr i} {
+        pack .ivad.ivad_$i.name .ivad.ivad_$i.value \
+         .ivad.ivad_$i.but -side left
+        pack .ivad.ivad_$i
+    }
+
+    button .ivad.set -text "Guarda" -relief raised -command {
+        setIVADs
+        redisplay
+    }
+    button .ivad.done -command {
+        setIVADs; destroy .ivad; redisplay
+    } -text "Fecha"
+
+    pack .ivad.set .ivad.done -expand 1 -fill both
+}
+
+proc setIVADs {} {
+    global ivadVal_0 ivadVal_1 ivadVal_2 ivadVal_3 ivadVal_4 ivadVal_5 ivadVal_6 ivadVal_7
+    global ivadVal_8 ivadVal_9 ivadVal_10 ivadVal_11 ivadVal_12 ivadVal_13 ivadVal_14 
+    global ivadEnable_0 ivadEnable_1 ivadEnable_2 ivadEnable_3 ivadEnable_4 ivadEnable_5 ivadEnable_6 ivadEnable_7
+    global ivadEnable_8 ivadEnable_9 ivadEnable_10 ivadEnable_11 ivadEnable_12 ivadEnable_13 ivadEnable_14 
+
+    setIVADValue 0 $ivadVal_0 $ivadEnable_0
+    setIVADValue 1 $ivadVal_1 $ivadEnable_1
+    setIVADValue 2 $ivadVal_2 $ivadEnable_2
+    setIVADValue 3 $ivadVal_3 $ivadEnable_3
+    setIVADValue 4 $ivadVal_4 $ivadEnable_4
+    setIVADValue 5 $ivadVal_5 $ivadEnable_5
+    setIVADValue 6 $ivadVal_6 $ivadEnable_6
+    setIVADValue 7 $ivadVal_7 $ivadEnable_7
+    setIVADValue 8 $ivadVal_8 $ivadEnable_8
+    setIVADValue 9 $ivadVal_9 $ivadEnable_9
+    setIVADValue 10 $ivadVal_10 $ivadEnable_10
+    setIVADValue 11 $ivadVal_11 $ivadEnable_11
+    setIVADValue 12 $ivadVal_12 $ivadEnable_12
+    setIVADValue 13 $ivadVal_13 $ivadEnable_13
+    setIVADValue 14 $ivadVal_14 $ivadEnable_14
+}
+
+
+proc clearIOWindow {} {
+    .text_IO.text delete 0.0 end
+}
+
+proc clearLCDWindow {} {
+    .interface_IO.text delete 0.0 end
+}
+
+proc setMemoryView {} {
+    toplevel .zonaMemoria
+
+    frame .zonaMemoria.topstart
+    frame .zonaMemoria.topn
+    frame .zonaMemoria.bottomstart
+    frame .zonaMemoria.bottomn
+    label .zonaMemoria.topstart.label -text "Endereço início de cima:"
+    entry .zonaMemoria.topstart.val -textvariable topmem_start
+    label .zonaMemoria.topn.label -text "Linhas em cima:"
+    entry .zonaMemoria.topn.val -textvariable topmem_n
+    label .zonaMemoria.bottomstart.label -text "Endereço início de baixo:"
+    entry .zonaMemoria.bottomstart.val -textvariable bottommem_start
+    label .zonaMemoria.bottomn.label -text "Linhas em baixo:"
+    entry .zonaMemoria.bottomn.val -textvariable bottommem_n
+    button .zonaMemoria.set -text "Guarda" -relief raised -command {displayMem}
+    button .zonaMemoria.done -command {destroy .zonaMemoria; displayMem} -text "Fecha"
+
+    pack .zonaMemoria.topstart.label .zonaMemoria.topstart.val -side left -fill both -expand 1
+    pack .zonaMemoria.topn.label .zonaMemoria.topn.val -side left -fill both -expand 1
+    pack .zonaMemoria.bottomstart.label .zonaMemoria.bottomstart.val -side left -fill both -expand 1
+    pack .zonaMemoria.bottomn.label .zonaMemoria.bottomn.val -side left -fill both -expand 1
+
+    pack .zonaMemoria.topstart .zonaMemoria.topn .zonaMemoria.bottomstart .zonaMemoria.bottomn -expand 1 -fill both
+    pack .zonaMemoria.set .zonaMemoria.done -expand 1 -fill both
+
+}
+
+proc setProgView {} {
+    toplevel .zonaProg
+
+    frame .zonaProg.position
+    frame .zonaProg.value
+    label .zonaProg.position.label -text "Endereço início programa:"
+    entry .zonaProg.position.val -textvariable startProg
+    label .zonaProg.value.label -text "Endereço fim programa:"
+    entry .zonaProg.value.val -textvariable endProg
+    button .zonaProg.set -text "Guarda" -relief raised -command {displayProgram}
+    button .zonaProg.done -command {destroy .zonaProg; displayProgram} -text "Fecha"
+
+    pack .zonaProg.position.label .zonaProg.position.val -side left -fill both -expand 1
+    pack .zonaProg.value.label .zonaProg.value.val -side left -fill both -expand 1
+
+    pack .zonaProg.position .zonaProg.value -expand 1 -fill both
+    pack .zonaProg.set .zonaProg.done -expand 1 -fill both
+}
+
+proc initPos {} {
+    global www hhh
+    set www [lindex [.text_IO.text config -width] 4]
+    set hhh [lindex [.text_IO.text config -height] 4]
+
+    .text_IO.text delete 0.0 end
+
+    for {set i 1} {$i < $hhh} {incr i} {
+        for {set j 0} {$j < $www} {incr j} {
+            .text_IO.text insert end " "
+        }
+        .text_IO.text insert end "\n"
+    }
+    for {set j 0} {$j < $www} {incr j} {
+        .text_IO.text insert end " "
+    }
+}
+
+proc initPos_lcd {} {
+    global www_lcd hhh_lcd
+    set www_lcd [lindex [.interface_IO.text config -width] 4]
+    set hhh_lcd [lindex [.interface_IO.text config -height] 4]
+
+    .interface_IO.text delete 0.0 end
+
+    for {set i 1} {$i < $hhh_lcd} {incr i} {
+        for {set j 0} {$j < $www_lcd} {incr j} {
+            .interface_IO.text insert end " "
+        }
+        .interface_IO.text insert end "\n"
+    }
+    for {set j 0} {$j < $www_lcd} {incr j} {
+        .interface_IO.text insert end " "
+    }
+}
+
+proc putAt {x y c} {
+    global www hhh
+
+    if {$y <= $hhh && $x < $www} {
+
+#       puts "$y (MAX $hhh); $x (MAX $www); $c"
+       if { $c == "\006" } {
+	   .text_IO.text delete $y.$x
+           .text_IO.text insert $y.$x "\\"
+       } else {
+	   .text_IO.text delete $y.$x
+           .text_IO.text insert $y.$x $c
+       }
+    }
+}
+
+proc putAt_lcd {x y c} {
+    global www_lcd hhh_lcd
+
+    if {$y <= $hhh_lcd && $x < $www_lcd} {
+       .interface_IO.text delete $y.$x
+       .interface_IO.text insert $y.$x $c
+    }
+}
+
+proc ioOutput {x} {
+    if { $x == "\006" } {
+       .text_IO.text insert end "\\"
+    } else {
+       .text_IO.text insert end $x
+    }
+    .text_IO.text see end
+}
+
+# proc ioOutput {x} {
+#     .text_IO.text insert end $x
+#     .text_IO.text see end
+# }
+
+# proc lcdOutput {x} {
+#     .interface_IO.text insert end $x
+#     .interface_IO.text see end
+# }
+
+proc toggleROMView {show} {
+    if {$show} {
+        displayRoms
+    } else {
+        destroy .roms
+    }
+}
+
+proc toggleInternalView {show} {
+    if {$show} {
+        displayInternalView
+    } else {
+        undisplayInternalView
+    }
+}
+
+proc displayInternalView {} {
+    pack .controlview .memory -side left -after .programview -expand yes -fill y
+    pack .bottom.control.clock -fill both -expand 1 -before .bottom.control.step
+
+}
+
+proc undisplayInternalView {} {
+    pack forget .controlview
+    pack forget .bottom.control.clock
+}
+
+
+proc setBreakPoint {} {
+    global breakpoint breakpoint_number
+    set line [.bottom.program.display cursel]
+    if {$line == ""} {return}
+    set ppline [.bottom.program.display get $line]
+    set pp [lindex [string range $ppline 2 end] 0]
+
+    if {[info exists breakpoint($pp)] == 0} {
+        catch {.breakpoints.list insert end  "$pp  [string range $ppline 7 end]"}
+    }
+
+    set breakpoint($pp) $ppline
+    incr breakpoint_number
+
+#    .bottom.program.display config -selectbackground red
+
+    redisplay
+}
+
+proc viewBreakPoints {} {
+    global breakpoint
+    set l [array get breakpoint]
+
+    catch {
+        toplevel .breakpoints
+        button .breakpoints.add -command {setBreakPoint} -text "Adiciona"
+        button .breakpoints.delete -command {deleteBreakpoint} -text "Apaga"
+        button .breakpoints.delall -command {deleteBreakPoints 1} -text "Apaga Todos"
+        button .breakpoints.done -command {destroy .breakpoints} -text "Fecha"
+        listbox .breakpoints.list
+    }
+    .breakpoints.list delete 0 end
+
+    for {set i 0} {$i < [llength $l]} {incr i 2} {
+        .breakpoints.list insert end  "[lindex $l $i] \
+                [string range [lindex $l [expr $i+1]] 7 end]"
+    }
+    pack .breakpoints.list -fill x -expand 1
+    pack .breakpoints.add .breakpoints.delete .breakpoints.delall .breakpoints.done -side left -expand 1 -fill both
+}
+
+proc deleteBreakPoints {flag} {
+    global breakpoint normalColor
+    .bottom.program.display config -selectbackground $normalColor
+    catch {unset breakpoint}
+    if {$flag} {
+        viewBreakPoints
+    } else {
+        catch {destroy .breakpoints}
+    }
+    redisplay
+}
+
+proc deleteBreakpoint {} {
+    global breakpoint
+
+    set s [.breakpoints.list curselection]
+    if {$s != ""} {
+        catch {
+            set s1 [lindex [.breakpoints.list get $s] 0]
+            unset breakpoint($s1)
+            .breakpoints.list delete $s
+        }
+    } else {
+        catch {
+            set s [.bottom.program.display curselection]
+            set s1 [.bottom.program.display get $s]
+            set s2 [lindex [string range $s1 2 end] 0]
+            .bottom.program.display delete $s
+            unset breakpoint($s2)
+        }
+    }
+    viewBreakPoints
+    redisplay
+}
+
+
+proc toggleIOView {show} {
+    if {$show} {
+        pack .text_IO.text -side left -expand 1 -fill both
+        pack .text_IO.scroll -expand 1 -fill both
+        wm deiconify .text_IO
+    } else {
+        pack forget .text_IO.text
+        pack forget .text_IO.scroll
+        wm withdraw .text_IO
+    }
+}
+
+
+proc toggleSevenView {show} {
+    if {$show} {
+        place .interface_IO.int -x 270 -y 95
+        place .interface_IO.text -x 8 -y 5
+	wm deiconify .interface_IO
+    } else {
+        place forget .interface_IO.text
+	place forget .interface_IO.int
+        wm withdraw .interface_IO
+    }
+}
+
+proc displayCopyright {} {
+    catch {destroy .copy}
+    toplevel .copy
+    text .copy.text -width 90 -height 18
+    pack .copy.text
+    set txt \
+{   Simulador para o microprocessador CISC descrito no Capítulo 12 de
+
+   "Arquitectura de Computadores: dos Sistemas Digitais aos Microprocessadores"
+   G. Arroz, J. Monteiro and A. Oliveira,
+   Universidade Técnica de Lisboa, Portugal
+   IST Press, 2007
+
+   Copyright (c) 2001-2009
+								    
+	Guilherme Arroz        Jose Monteiro      Arlindo Oliveira
+     egsa@tagus.ist.utl.pt    jcm@inesc-id.pt      aml@inesc-id.pt
+
+
+   Colaboração:
+		
+   Fausto Ferreira <fmpf@algos.inesc-id.pt>
+   João Jerónimo   <joao.jeronimo@ist.utl.pt> 
+   Nuno J. Silva   <nunojsilva@ist.utl.pt> 
+}
+
+    .copy.text insert end $txt
+    button .copy.done -text "Fecha" -command {destroy .copy}
+    pack .copy.done -expand 1 -fill x
+}
+
+#
+# Procedures that handle the raw IO window
+#
+
+proc ToggleButton {but} {
+    global switch
+
+    set switch($but) [expr 1 - $switch($but)]
+
+    if {$switch($but) == 1} {
+        .interface_IO.board.switch_$but config -image on_switch
+    } else {
+        .interface_IO.board.switch_$but config -image off_switch
+    }
+
+}
+
+proc DisplaySevenSegmentDigit {i a b c d e f g} {
+    if {$a == 1} {
+        .interface_IO.board.a_$i config -image horizontal_led
+    } else {
+        .interface_IO.board.a_$i config -image horizontal_dark_led
+    }
+ 
+    if {$f == 1} {
+        .interface_IO.board.b_$i config -image vertical_led
+    } else {
+        .interface_IO.board.b_$i config -image vertical_dark_led
+    }
+ 
+    if {$b == 1} {
+        .interface_IO.board.c_$i config -image vertical_led
+    } else {
+        .interface_IO.board.c_$i config -image vertical_dark_led
+    }
+ 
+    if {$g == 1} {
+        .interface_IO.board.d_$i config -image horizontal_led
+    } else {
+        .interface_IO.board.d_$i config -image horizontal_dark_led
+    }
+ 
+    if {$e == 1} {
+        .interface_IO.board.e_$i config -image vertical_led
+    } else {
+        .interface_IO.board.e_$i config -image vertical_dark_led
+    }
+ 
+    if {$c == 1} {
+        .interface_IO.board.f_$i config -image vertical_led
+    } else {
+        .interface_IO.board.f_$i config -image vertical_dark_led
+    }
+ 
+    if {$d == 1} {
+        .interface_IO.board.g_$i config -image horizontal_led
+    } else {
+        .interface_IO.board.g_$i config -image horizontal_dark_led
+    }
+        
+    
+}
+
+proc DisplayLeds {l_1 l_2 l_3 l_4 l_5 l_6 l_7 l_8 l_9 l_10 l_11 l_12 l_13 l_14 l_15 l_16} {
+    for {set i 1} { $i <= 4} {incr i} {
+        set v l_$i
+        eval "set u $$v"
+        switch $u {
+            0 { .interface_IO.board.led_$i config -image gray_led }
+            1 { .interface_IO.board.led_$i config -image red_led }
+            
+        }
+    }
+    for {set i 5} { $i <= 8} {incr i} {
+        set v l_$i
+        eval "set u $$v"
+        switch $u {
+            0 { .interface_IO.board.led_$i config -image gray_led }
+            1 { .interface_IO.board.led_$i config -image yellow_led }
+            
+        }
+    }
+    for {set i 9} { $i <= 12} {incr i} {
+        set v l_$i
+        eval "set u $$v"
+        switch $u {
+            0 { .interface_IO.board.led_$i config -image gray_led }
+            1 { .interface_IO.board.led_$i config -image green_led }
+            
+        }
+    }
+   for {set i 13} { $i <= 16} {incr i} {
+        set v l_$i
+        eval "set u $$v"
+        switch $u {
+            0 { .interface_IO.board.led_$i config -image gray_led }
+            1 { .interface_IO.board.led_$i config -image red_led }
+            
+        }
+    } 
+}
+
+
+proc ReadSwitches {} {
+    global switch
+
+    set res 0
+    set mult 128
+    for {set i 1} {$i <= 8} {incr i} {
+        set res [expr $res + $mult * $switch($i)]
+        set mult [expr $mult / 2]
+    }
+    return $res
+}
+
+
+# proc displayCopyright {} {
+#     catch {destroy .copy}
+#     toplevel .copy
+#     text .copy.text -width 80 -height 10
+#     pack .copy.text
+#
+#     set f [open "Copyright" "r"]
+#
+#     for {} {[gets $f st] >= 0} {} {
+#         .copy.text insert end "$st\n"
+#     }
+#     button .copy.done -text "Done" -command {destroy .copy}
+#     pack .copy.done -expand 1 -fill x
+# }
+
+
+
+
+#
+#  msim
+#
+
+# font specification is platform dependent!
+if { $tcl_platform(platform) == "unix"} {
+set displayFont "-adobe-courier-medium-r-*-*-12-*-*-*-*-*-*-*"
+set ioFont "-adobe-courier-medium-r-*-*-14-*-*-*-*-*-*-*"
+#set ioFont "monospace 11"
+#set ioFont 7x13
+set lcdFont "-adobe-courier-medium-r-*-*-24-*-*-*-*-*-*-*"
+} else {
+set displayFont "{terminal} 8"
+set ioFont "{terminal} 8"
+set lcdFont "{terminal} 14"
+}
+#echo
+
+frame .statistics  -relief ridge -borderw 8
+frame .programview -relief ridge -borderw 8
+frame .controlview -relief ridge -borderw 8
+frame .bottom
+frame .bottom.control -relief ridge -borderw 8
+frame .memory
+frame .bottom.program
+
+
+frame .menu
+pack .menu -side top -fill x -expand 1
+
+
+set instructions 0
+set clocks 0
+set internalViewControl 0
+set ioViewControl 0
+set sevenViewControl 0
+set breakpoint_number 1
+
+set topmem_start 32768
+set bottommem_start 64768
+set topmem_n 64
+set bottommem_n 64
+set startProg 0
+set endProg 512
+
+
+set normalColor "#c3c3c3"
+set systemRegisters "R1 R2 R3 R4 R5 R6 R7 PC SP RE"
+
+set ivadVal_0 0
+set ivadVal_1 1
+set ivadVal_2 2
+set ivadVal_3 3
+set ivadVal_4 4
+set ivadVal_5 5
+set ivadVal_6 6
+set ivadVal_7 7
+set ivadVal_8 8
+set ivadVal_9 9
+set ivadVal_10 A
+set ivadVal_11 B
+set ivadVal_12 C
+set ivadVal_13 D
+set ivadVal_14 E
+
+set ivadEnable_0 1
+set ivadEnable_1 1
+set ivadEnable_2 1
+set ivadEnable_3 1
+set ivadEnable_4 1
+set ivadEnable_5 1
+set ivadEnable_6 1
+set ivadEnable_7 1
+set ivadEnable_8 1
+set ivadEnable_9 1
+set ivadEnable_10 1
+set ivadEnable_11 1
+set ivadEnable_12 1
+set ivadEnable_13 1
+set ivadEnable_14 1
+setIVADs
+
+frame .statistics.inst
+label .statistics.inst.text -text "Instruções "
+label .statistics.inst.number -textvar instructions
+frame .statistics.clocks
+label .statistics.clocks.text -text "Ciclos de relógio "
+label .statistics.clocks.number -textvar clocks
+
+pack .statistics.inst.text .statistics.inst.number -side left
+pack .statistics.clocks.text .statistics.clocks.number -side left
+pack .statistics.inst .statistics.clocks -anchor w
+pack .statistics -expand yes -fill x
+
+#
+# Display programmers view of the processor
+#
+
+for {set i 0} {$i < 8} {incr i} {
+     frame .programview.f_$i
+     label .programview.f_$i.name -font $displayFont -text "R$i "
+     label .programview.f_$i.value -font $displayFont -relief raised -text [regContent $i]
+     pack .programview.f_$i.name .programview.f_$i.value -side left
+     pack .programview.f_$i -anchor w
+}
+
+frame .programview.pc
+label .programview.pc.name -font $displayFont  -text "PC "
+label .programview.pc.value -font $displayFont -relief raised -text [pcContent]
+pack .programview.pc.name .programview.pc.value -side left
+pack .programview.pc -pady 0.2c -anchor w
+
+frame .programview.sp
+label .programview.sp.name -font $displayFont  -text "SP "
+label .programview.sp.value -font $displayFont -relief raised -text [spContent]
+pack .programview.sp.name .programview.sp.value -side left
+pack .programview.sp -pady 0.2c -anchor w
+
+frame .programview.re
+label .programview.re.nm_0 -font $displayFont  -text O
+label .programview.re.fl_0 -font $displayFont -relief raised -text [reContent 0]
+label .programview.re.nm_1 -font $displayFont  -text N
+label .programview.re.fl_1 -font $displayFont -relief raised -text [reContent 1]
+label .programview.re.nm_2 -font $displayFont  -text C
+label .programview.re.fl_2 -font $displayFont -relief raised -text [reContent 2]
+label .programview.re.nm_3 -font $displayFont  -text Z
+label .programview.re.fl_3 -font $displayFont -relief raised -text [reContent 3]
+label .programview.re.nm_4 -font $displayFont  -text E
+label .programview.re.fl_4 -font $displayFont -relief raised -text [reContent 4]
+for {set i 0} {$i < 5} {incr i} {
+    pack .programview.re.fl_$i .programview.re.nm_$i -side right
+}
+pack .programview.re -pady 0.2c
+
+#
+# Display internal view of the processor
+#
+
+for {set i 8} {$i < 16} {incr i} {
+     frame .controlview.f_$i
+     set regname [format "R%2d  " $i]
+     label .controlview.f_$i.name -font $displayFont -text "$regname"
+     label .controlview.f_$i.value -font $displayFont -relief raised -text [regContent $i]
+     pack .controlview.f_$i.name -fill x -side left -anchor w
+     pack .controlview.f_$i.value -side left -anchor e
+     pack .controlview.f_$i -anchor w
+}
+
+frame .controlview.car
+label .controlview.car.name -font $displayFont  -text "CAR "
+label .controlview.car.value -font $displayFont -relief raised -text [carContent]
+label .controlview.car.sbrname -font $displayFont  -text "   SBR "
+label .controlview.car.sbrvalue -font $displayFont -relief raised -text [sbrContent]
+pack .controlview.car.name .controlview.car.value .controlview.car.sbrname .controlview.car.sbrvalue -side left
+pack .controlview.car -pady 0.1c -anchor w
+
+frame .controlview.ui
+label .controlview.ui.name -font $displayFont  -text "uI  "
+label .controlview.ui.value -font $displayFont -relief raised -text [uiContent]
+pack .controlview.ui.name .controlview.ui.value -side left
+pack .controlview.ui -pady 0.1c -anchor w
+
+frame .controlview.ir
+label .controlview.ir.name -font $displayFont  -text "RI "
+label .controlview.ir.value -font $displayFont -relief raised -text [irContent]
+label .controlview.ir.intfname -font $displayFont  -text " INT "
+label .controlview.ir.intfvalue -font $displayFont -relief raised -text [intContent]
+pack .controlview.ir.name .controlview.ir.value .controlview.ir.intfname .controlview.ir.intfvalue -side left
+pack .controlview.ir -pady 0.1c -anchor w
+
+frame .controlview.re
+#label .controlview.re.nm_0 -font $displayFont  -text o
+#label .controlview.re.fl_0 -font $displayFont -relief raised -text [ureContent 0]
+#label .controlview.re.nm_1 -font $displayFont  -text n
+#label .controlview.re.fl_1 -font $displayFont -relief raised -text [ureContent 1]
+label .controlview.re.nm_2 -font $displayFont  -text c
+label .controlview.re.fl_2 -font $displayFont -relief raised -text [ureContent 2]
+label .controlview.re.nm_3 -font $displayFont  -text z
+label .controlview.re.fl_3 -font $displayFont -relief raised -text [ureContent 3]
+
+for {set i 2} {$i < 4} {incr i} {
+    pack .controlview.re.fl_$i .controlview.re.nm_$i -side right
+}
+pack .controlview.re -pady 0.1c
+
+toplevel .text_IO
+text  .text_IO.text -height 24 -width 80 -background black -foreground white -yscrollcommand ".text_IO.scroll set" -setgrid 1 -font $ioFont
+scrollbar .text_IO.scroll -command ".text_IO.text yview"
+
+if { [file exists interruptKeys.tcl] } {
+    source interruptKeys.tcl
+}
+
+bind .text_IO.text  <Key> {ioInput %A; break}
+wm withdraw .text_IO
+
+
+#
+# Other interface items
+#
+
+button .bottom.control.clock -text "Clock" -command {doClock}
+button .bottom.control.step -text "Instrução" -command {doStep}
+button .bottom.control.run -text "Corre" -command { resetPC; resetStats; switchProcRunStatus}
+button .bottom.control.reset -text "Reinícia" -command { resetPC; resetStats}
+button .bottom.control.stop -text "Continua" -command {switchProcRunStatus}
+button .bottom.control.refresh -text "Refresca" -command {redisplay}
+
+
+
+toplevel .interface_IO -borderwidth 0 -width 480 -height 400 -bg black -relief sunken
+canvas .interface_IO.board -width  480 -height 300 -bg black -bd 0 -relief sunken
+
+text  .interface_IO.text -height 2 -width 16 -background #217d34 -foreground #010053  -setgrid 1 -font $lcdFont
+
+frame .interface_IO.int -bg black
+
+button .interface_IO.int.i0 -text "I0" -command {interruptProc 0} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i1 -text "I1" -command {interruptProc 1} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i2 -text "I2" -command {interruptProc 2} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i3 -text "I3" -command {interruptProc 3} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i4 -text "I4" -command {interruptProc 4} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i5 -text "I5" -command {interruptProc 5} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i6 -text "I6" -command {interruptProc 6} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i7 -text "I7" -command {interruptProc 7} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i8 -text "I8" -command {interruptProc 8} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i9 -text "I9" -command {interruptProc 9} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i10 -text "IA" -command {interruptProc 10} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i11 -text "IB" -command {interruptProc 11} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i12 -text "IC" -command {interruptProc 12} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i13 -text "ID" -command {interruptProc 13} -borderwidth 0 -bg gray -width 2
+button .interface_IO.int.i14 -text "IE" -command {interruptProc 14} -borderwidth 0 -bg gray -width 2
+
+
+
+grid configure .interface_IO.int.i7 -row 0 -column 0 -pady 10 -padx 4
+grid configure .interface_IO.int.i8  -row 0 -column 1 -padx 4
+grid configure .interface_IO.int.i9  -row 0 -column 2 -padx 4
+grid configure .interface_IO.int.i12  -row 0 -column 3 -padx 4
+grid configure .interface_IO.int.i4 -row 1 -column 0 -pady 10
+grid .interface_IO.int.i5 -row 1 -column 1
+grid .interface_IO.int.i6 -row 1 -column 2
+grid .interface_IO.int.i13 -row 1 -column 3
+grid configure .interface_IO.int.i1  -row 2 -column 0 -pady 10
+grid .interface_IO.int.i2 -row 2 -column 1
+grid .interface_IO.int.i3 -row 2  -column 2
+grid .interface_IO.int.i14 -row 2 -column 3
+grid configure .interface_IO.int.i0  -row 3 -column 0 -pady 10
+grid .interface_IO.int.i10 -row 3 -column 1
+grid .interface_IO.int.i11 -row 3 -column 2
+
+wm withdraw .interface_IO
+
+bind .interface_IO short_para_placa
+
+pack .bottom.control.step -fill both -expand 1
+pack .bottom.control.run -fill both -expand 1
+pack .bottom.control.reset -fill both -expand 1
+pack .bottom.control.stop -fill both -expand 1
+pack .bottom.control.refresh -fill both -expand 1
+#pack .bottom.control.clock -fill both -expand 1
+
+
+pack .bottom.control -side right -expand yes -fill both
+pack .bottom -side bottom -fill x -expand yes
+
+
+frame .memory.mem1
+frame .memory.mem2
+scrollbar .memory.mem1.scroll1 -command ".memory.mem1.display1 yview"
+listbox .memory.mem1.display1 -yscroll ".memory.mem1.scroll1 set" -width 75 -height 12 -font $displayFont
+scrollbar .memory.mem2.scroll2 -command ".memory.mem2.display2 yview"
+listbox .memory.mem2.display2 -yscroll ".memory.mem2.scroll2 set" -width 75 -height 6 -font $displayFont
+
+displayMem
+
+pack .memory.mem1.scroll1 -side right -fill y
+pack .memory.mem1.display1  -side left -fill both -expand 1
+pack .memory.mem1
+pack .memory.mem2.scroll2 -side right -fill y
+pack .memory.mem2.display2  -side left -fill both -expand 1
+pack .programview .memory -side left -fill both -expand 1
+pack .memory.mem2
+
+
+menubutton .menu.file -text "Ficheiro" -menu .menu.file.menu
+menubutton .menu.definitions -text "Definições" -menu .menu.definitions.menu
+menubutton .menu.command -text "Comandos" -menu .menu.command.menu
+menubutton .menu.debug -text "Depuração" -menu .menu.debug.menu
+menubutton .menu.view -text "Ver" -menu .menu.view.menu
+menubutton .menu.help -text "Ajuda" -menu .menu.help.menu
+
+menu .menu.file.menu
+.menu.file.menu add command -label "Carrega Programa" -command {
+    set fname [fileSelection "Carrega Programa" "*.exe" "prog.exe"];
+    if {$fname != ""} { loadProgram $fname;  resetPC; resetStats; deleteBreakPoints 0};
+    redisplay
+}  -accelerator "Ctrl+L"
+.menu.file.menu add command -label "Escreve Memória" -command {
+    set fname [fileSelection "Escreve Memória" "*.mem" "memory.mem"]
+    if {$fname != ""} {dumpMemory $fname};
+    redisplay
+}
+.menu.file.menu add command -label "Carrega Memória" -command {
+    set fname [fileSelection "Carrega Memória" "*.mem" "memory.mem"]
+    if {$fname != ""} {loadMemory $fname};
+    redisplay
+}
+.menu.file.menu add separator
+.menu.file.menu add command -label "Carrega ROM de Controlo" -command {
+    set fname [fileSelection "Carrega ROM de Controlo" "*.roms" "control.roms"]
+    if {$fname != ""} {loadControlRom $fname};
+    displayRomContents
+    redisplay
+}  -accelerator "Ctrl+C"
+.menu.file.menu add command -label "Carrega ROM A" -command {
+    set fname [fileSelection "Carrega ROM A" "*.roms" "map.roms"]
+    if {$fname != ""} {loadMapRom $fname A};
+    displayRomContents
+    redisplay
+}  -accelerator "Ctrl+A"
+.menu.file.menu add command -label "Carrega ROM B" -command {
+    set fname [fileSelection "Carrega ROM B" "*.roms" "map.roms"]
+    if {$fname != ""} {loadMapRom $fname B};
+    displayRomContents
+    redisplay
+}  -accelerator "Ctrl+B"
+.menu.file.menu add separator
+
+.menu.file.menu add command -label "Sai" -command {destroy .} -accelerator "Ctrl+Q"
+
+menu .menu.definitions.menu
+.menu.definitions.menu add command -label "Define IVAD" -command {setIVAD}
+.menu.definitions.menu add command -label "Zona de Memória" -command {setMemoryView}
+.menu.definitions.menu add command -label "Zona de Programa" -command {setProgView}
+
+menu .menu.command.menu
+.menu.command.menu add command -label "Instrução" -command {doStep } -accelerator "Ctrl+I"
+.menu.command.menu add command -label "Instruções..." -command {dostepwin }
+# NOTA:  Dá erro devido ao resetLCD !!!
+#.menu.command.menu add command -label "Corre"  -command { resetPC;  resetLCD; resetStats; switchProcRunStatus } -accelerator "Ctrl+R"
+#.menu.command.menu add command -label "Reinícia"  -command { resetPC; resetLCD; resetStats}
+.menu.command.menu add command -label "Corre"  -command { resetPC; resetStats; switchProcRunStatus } -accelerator "Ctrl+R"
+.menu.command.menu add command -label "Reinícia"  -command { resetPC; resetStats}
+.menu.command.menu add command -label "Continua" -command {switchProcRunStatus }
+.menu.command.menu add command -label "Refresca" -command {redisplay}
+# .menu.command.menu add command -label "Clock" -command {doClock }
+
+menu .menu.debug.menu
+.menu.debug.menu add command -label "Pontos de Paragem" -command {viewBreakPoints}
+.menu.debug.menu add command -label "Escreve Registo" -command {setRegister}
+.menu.debug.menu add command -label "Escreve Memória" -command {setMemory}
+.menu.debug.menu add command -label "Limpa Memória" -command {clrmem}
+
+menu .menu.view.menu
+.menu.view.menu add checkbutton -label "Ver Controlo" -variable internalViewControl -command {toggleInternalView $internalViewControl} -accelerator "Ctrl+K"
+.menu.view.menu add checkbutton -label "Ver ROMs" -variable romViewControl -command {toggleROMView $romViewControl} -accelerator "Ctrl+O"
+.menu.view.menu add separator
+.menu.view.menu add checkbutton -label "Janela Texto" -underline 7 -variable ioViewControl -command {toggleIOView $ioViewControl} -accelerator "Ctrl+T"
+.menu.view.menu add checkbutton -label "Janela Placa" -underline 7 -variable sevenViewControl -command {toggleSevenView $sevenViewControl} -accelerator "Ctrl+P"
+#.menu.view.menu add command -label "Clear IO window" -command {clearIOWindow}
+#.menu.view.menu add command -label "Clear LCD window" -command {clearLCDWindow}
+
+#================================================
+##  Associações para os shortcuts
+#================================================
+proc short_para_controlo {} {
+	global internalViewControl
+	if {$internalViewControl} {
+		set internalViewControl 0
+	} else {
+		set internalViewControl 1	
+	}
+	toggleInternalView $internalViewControl
+}
+
+proc short_para_roms {} {
+	global romViewControl
+	if {$romViewControl} {
+		set romViewControl 0
+	} else {
+		set romViewControl 1	
+	}
+	toggleROMView $romViewControl
+}
+
+proc short_para_texto {} {
+	global ioViewControl
+	if {$ioViewControl} {
+		set ioViewControl 0
+	} else {
+		set ioViewControl 1	
+	}
+	toggleIOView $ioViewControl
+}
+
+proc short_para_placa {} {
+	global sevenViewControl
+	if {$sevenViewControl} {
+		set sevenViewControl 0
+	} else {
+		set sevenViewControl 1	
+	}
+	toggleSevenView $sevenViewControl
+}
+
+# do menu ver
+bind all <Control-o> {short_para_roms}
+bind all <Control-k> {short_para_controlo}
+bind all <Control-p> {short_para_placa}
+bind all <Control-t> {short_para_texto}
+
+# Run
+#bind all <Control-r> { resetPC;  resetLCD; resetStats; switchProcRunStatus }
+bind all <Control-r> { resetPC; resetStats; switchProcRunStatus}
+
+# Carrega Programa
+bind all <Control-l> {
+    set fname [fileSelection "Carrega Programa" "*.exe" "prog.exe"];
+    if {$fname != ""} { loadProgram $fname;  resetPC; resetStats; deleteBreakPoints 0};
+    redisplay
+}
+# Carrega ROM de Controlo
+bind all <Control-c> {
+    set fname [fileSelection "Carrega ROM de Controlo" "*.roms" "control.roms"]
+    if {$fname != ""} {loadControlRom $fname};
+    displayRomContents
+    redisplay
+}
+# Carrega ROM A
+bind all <Control-a> {
+    set fname [fileSelection "Carrega ROM A" "*.roms" "map.roms"]
+    if {$fname != ""} {loadMapRom $fname A};
+    displayRomContents
+    redisplay
+}
+# Carrega ROM B
+bind all <Control-b> {
+    set fname [fileSelection "Carrega ROM B" "*.roms" "map.roms"]
+    if {$fname != ""} {loadMapRom $fname B};
+    displayRomContents
+    redisplay
+}
+
+# Sai
+bind all <Control-q> {
+    destroy .
+}
+
+# Executa uma instrução
+bind all <Control-i> {
+    doStep
+}
+
+#==================================================
+
+menu .menu.help.menu
+.menu.help.menu add command -label "Acerca..." -command {displayCopyright}
+
+pack .menu.file -side left
+pack .menu.definitions  -side left
+pack .menu.command  -side left
+pack .menu.debug  -side left
+pack .menu.view -side left
+pack .menu.help -side right
+
+
+#text .bottom.output.text -background gray80 -height 10
+#pack .bottom.output.text -expand 1 -fill x
+#pack .bottom.output -fill both -expand 1 -side right
+
+scrollbar .bottom.program.scroll -command ".bottom.program.display yview"
+listbox .bottom.program.display -yscroll ".bottom.program.scroll set" -width 50 -height 13 -font $displayFont
+bind .bottom.program.display <1> {.bottom.program.display config -selectbackground $normalColor}
+displayProgram
+
+
+pack .bottom.program.scroll -side right -fill y
+pack .bottom.program.display  -side left -fill both -expand 1
+pack .bottom.program .bottom.program -side left -fill both -expand 1
+
+
+image create photo horizontal_led -file [format "%s%s" $p3path "horline.gif"]
+image create photo vertical_led -file [format "%s%s" $p3path verline.gif]
+image create photo red_dot -file [format "%s%s" $p3path reddot.gif]
+image create photo gray_dot -file [format "%s%s" $p3path graydot.gif]
+image create photo horizontal_dark_led -file [format "%s%s" $p3path horgrayline.gif]
+image create photo vertical_dark_led -file [format "%s%s" $p3path vergrayline.gif]
+
+
+for {set i 1} {$i <= 4} {incr i} {
+
+    label .interface_IO.board.a_$i -image horizontal_dark_led -borderwidth 0
+    label .interface_IO.board.b_$i -image vertical_dark_led -borderwidth 0
+    label .interface_IO.board.c_$i -image vertical_dark_led -borderwidth 0
+    label .interface_IO.board.d_$i -image horizontal_dark_led -borderwidth 0
+    label .interface_IO.board.e_$i -image vertical_dark_led -borderwidth 0
+    label .interface_IO.board.f_$i -image vertical_dark_led -borderwidth 0
+    label .interface_IO.board.g_$i -image horizontal_dark_led -borderwidth 0
+    label .interface_IO.board.dot_$i -image gray_dot -borderwidth 0
+
+    place .interface_IO.board.a_$i -x [expr $i*60 -60 + 15] -y 135
+    place .interface_IO.board.b_$i -x [expr $i*60 -60 + 5] -y 145
+    place .interface_IO.board.c_$i -x [expr $i*60 -60 + 45] -y 145
+    place .interface_IO.board.d_$i -x [expr $i*60 -60 + 15] -y 175
+    place .interface_IO.board.e_$i -x [expr $i*60 -60 + 5] -y 185
+    place .interface_IO.board.f_$i -x [expr $i*60 -60 + 45] -y 185
+    place .interface_IO.board.g_$i -x [expr $i*60 -60 + 15] -y 215
+    place .interface_IO.board.dot_$i -x [expr $i*60 -60 + 51] -y 216
+
+}
+
+pack .interface_IO.board
+
+image create photo gray_led -file [format "%s%s" $p3path grayled.gif]
+image create photo red_led -file [format "%s%s" $p3path redled.gif]
+image create photo green_led -file [format "%s%s" $p3path greenled.gif]
+image create photo yellow_led -file [format "%s%s" $p3path yellowled.gif]
+
+frame .leds -borderwidth 0 -width 480 -height 20 -bg black -relief sunken
+for {set i 1} {$i <= 16} {incr i} {
+    label .interface_IO.board.led_$i -image gray_led -borderwidth 0 -relief sunken
+    place .interface_IO.board.led_$i -y 70 -x [expr 8 + ($i-1) * 30]
+}
+
+
+image create photo on_switch -file [format "%s%s" $p3path onswitch.gif]
+image create photo off_switch -file [format "%s%s" $p3path offswitch.gif]
+
+for {set i 1} {$i <= 8} {incr i} {
+    set switch($i) 0
+    button .interface_IO.board.switch_$i -image off_switch -borderwidth 0 -command "ToggleButton $i"
+    place .interface_IO.board.switch_$i -y 255 -x [expr 8 + ($i-1) * 30]
+}
+
+
+
+for {set i 0} {$i < $argc} {incr i} {
+    switch -- [lindex $argv $i] {
+	-A {incr i
+	    loadMapRom [lindex $argv $i] A
+	}
+	-B {incr i
+	    loadMapRom [lindex $argv $i] B
+	}
+	-C {incr i
+	    loadControlRom [lindex $argv $i]
+	}
+	-P {incr i
+	    loadProgram [lindex $argv $i]
+	}
+	-H {displayUsage}
+	--help {displayUsage}
+	default {loadProgram [lindex $argv $i]}
+    }
+}
+
+redisplay
